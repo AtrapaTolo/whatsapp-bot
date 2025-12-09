@@ -12,32 +12,8 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'mi_token_de_pruebas';
-
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-async function sendWhatsAppTextMessage(to, text) {
-  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
-
-  const body = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'text',
-    text: { body: text },
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${ACCESS_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-  console.log('📤 Respuesta de envío:', JSON.stringify(data, null, 2));
-}
 
 // 4. Middleware para leer JSON en el cuerpo de las peticiones
 app.use(express.json());
@@ -62,6 +38,30 @@ app.get('/webhook/whatsapp', (req, res) => {
     return res.sendStatus(403);
   }
 });
+
+// función para enviar mensajes de texto por WhatsApp
+async function sendWhatsAppTextMessage(to, text) {
+  const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+
+  const body = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: { body: text },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+  console.log('📤 Respuesta de envío:', JSON.stringify(data, null, 2));
+}
 
 // 6. Webhook de WhatsApp (todavía sin IA, solo para ver que llega algo)
 //    POST http://localhost:4000/webhook/whatsapp
