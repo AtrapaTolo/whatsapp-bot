@@ -33,6 +33,26 @@ app.get('/ping', (req, res) => {
   res.json({ mensaje: 'pong desde whatsapp-bot' });
 });
 
+// Endpoint de debug para probar la conexión con el microservicio NPS
+app.post('/debug/test-nps', async (req, res) => {
+  try {
+    console.log('[/debug/test-nps] Payload recibido:', req.body);
+
+    const respuesta = await enviarRespuestaEncuesta(req.body);
+
+    return res.json({
+      ok: true,
+      detalle: 'Llamada (o simulación) al NPS realizada. Revisa los logs del bot y del NPS.',
+    });
+  } catch (err) {
+    console.error('[/debug/test-nps] Error llamando al NPS:', err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
+});
+
 // 3. Verificación Webhook (GET)
 app.get('/webhook/whatsapp', (req, res) => {
   const mode = req.query['hub.mode'];
