@@ -5,14 +5,26 @@ const {
   clasificarOpcionTicket,
 } = require('./aiClient');
 
-function addToHistory(session, de, texto) {
+function addToHistory(session, de, texto, extra = {}) {
+  const {
+    tipo = 'texto',       // 'texto' | 'imagen' | 'audio' | ...
+    url = null,
+    transcripcion = null,
+    caption = null,
+  } = extra;
+
   session.historia.push({
-    de, // 'cliente' | 'bot'
+    de,                   // 'cliente' | 'bot'
     texto,
+    tipo,
+    url,
+    transcripcion,
+    caption,
     fecha: new Date().toISOString(),
   });
 }
 
+// 👉 AQUÍ volvemos a declarar construirPayloadEncuesta
 function construirPayloadEncuesta(session) {
   return {
     order_id: session.order_id || null,
@@ -26,6 +38,73 @@ function construirPayloadEncuesta(session) {
     sentimiento: session.sentimiento || null,
     canal: 'whatsapp',
   };
+}
+
+// 👉 construirPayloadEmail con el formato nuevo del asunto y del cuerpo
+function construirPayloadEmail(session) {
+  const rawOrderId = session.order_id || 'SINPEDIDO';
+
+  // Si ya lleva PVAM, no lo repetimos
+  const orderIdParaAsunto = rawOrderId.toString().toUpperCase().startsWith('PVAM')
+    ? rawOrderId
+    : `PVAM ${rawOrderId}`;
+
+  const asunto = `Incidencia detectada por whatsapp - ${orderIdParaAsunto}`;
+
+  const lineas = [];
+
+  lineas.push('Hemos detectado una incidencia en la experiencia de compra de un cliente:');
+  lineas.push('');
+  lineas.push(`Pedido: ${session.order_id || 'No informado'}`);
+  lineas.push(`Cliente ID: ${session.cliente_id || 'No informado'}`);
+  lineas.push(`Teléfono: ${session.telefono || 'No informado'}`);
+
+  if (session.sentimiento) {
+    lineas.push(`Sentimiento detectado: ${session.sentimiento}`);
+  }
+  if (session.nps_score != null) {
+    lineas.push(`NPS (si se ha informado): ${session.nps_score}`);
+  }
+
+  lineas.push('');
+  lineas.push('Resumen / comentarios:');
+  lineas.push(session.comentarios || '(sin comentarios)');
+  lineas.push('');
+  lineas.push('Transcripción completa:');
+
+  session.historia.forEach((m) => {
+    const fecha = m.fecha || '';
+    const autor = m.de === 'cliente' ? 'Cliente' : 'Bot';
+    const tipo = m.tipo || 'texto';
+
+    if (tipo === 'texto') {
+      lineas.push(`[${fecha}] ${autor}: ${m.texto}`);
+    } else if (tipo === 'imagen') {
+      lineas.push(`[${fecha}] ${autor}: Imagen recibida`);
+      if (m.caption) {
+        lineas.push(`   Pie de foto: ${m.caption}`);
+      }
+      if (m.url) {
+        lineas.push(`   Referencia imagen: ${m.url}`);
+      }
+    } else if (tipo === 'audio') {
+      lineas.push(`[${fecha}] ${autor}: Audio recibido`);
+      if (m.transcripcion) {
+        lineas.push(`   Transcripción: ${m.transcripcion}`);
+      }
+      if (m.url) {
+        lineas.push(`   Referencia audio: ${m.url}`);
+      }
+    } else {
+      lineas.push(`[${fecha}] ${autor}: Mensaje tipo ${tipo}`);
+      if (m.texto) {
+        lineas.push(`   Contenido: ${m.texto}`);
+      }
+    }
+  });
+
+  const cuerpo = lineas.join('\n');
+  return { asunto, cuerpo };
 }
 
 function construirPayloadEmail(session) {
@@ -260,4 +339,4 @@ async function procesarMensaje(session, textoCliente) {
   return { session, mensajesACliente, eventos };
 }
 
-module.exports = { procesarMensaje };
+module.exports = { procesarMensaje, addToHistory };

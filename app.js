@@ -8,9 +8,11 @@ const {
   saveSession,
   deleteSession,
 } = require('./sessions');
-const { procesarMensaje } = require('./conversationLogic');
+const { procesarMensaje, addToHistory } = require('./conversationLogic');
 const { enviarRespuestaEncuesta } = require('./npsClient');
 const { enviarEmailIncidencia } = require('./emailClient');
+const { descargarYGuardarMedia, MEDIA_STORAGE_PATH } = require('./mediaService');
+const { transcribirAudioWhisper } = require('./sttClient');
 
 // 1. App Express
 const app = express();
@@ -23,6 +25,8 @@ const WHATSAPP_PHONE_NUMBER_ID =
   process.env.WHATSAPP_PHONE_NUMBER_ID; // 789116377618444
 
 app.use(express.json());
+// Servir ficheros estáticos de media
+app.use('/media', express.static(MEDIA_STORAGE_PATH));
 
 // 2. Ping
 app.get('/ping', (req, res) => {
@@ -119,14 +123,125 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const value = change?.value;
     const message = value?.messages?.[0];
 
-    if (!message || message.type !== 'text') {
+    if (!message) {
       return;
     }
 
     const from = message.from; // teléfono del cliente
-    const text = message.text?.body || '';
+    let textoCliente = '';
+    let esTexto = false;
 
-    console.log(`👤 Mensaje de ${from}: ${text}`);
+    // 1) Mensajes de texto (flujo normal de IA)
+    if (message.type === 'text') {
+      esTexto = true;
+      textoCliente = message.text?.body || '';
+      console.log(`👤 Mensaje de ${from}: ${textoCliente}`);
+
+    // 2) Imagen: la descargamos, guardamos y además usamos el caption como texto para la IA
+    } else if (message.type === 'image') {
+      console.log(`👤 Imagen recibida de ${from}`);
+
+      let session = getSessionByPhone(from);
+      if (!session) {
+        console.warn(
+          `[SESIONES] No había sesión para ${from}, creando una sesión huérfana (sin order_id).`
+        );
+        session = createSession({ telefono: from });
+      }
+
+      const caption = message.image?.caption || '(Imagen sin texto)';
+      const mediaId = message.image?.id || null;
+
+      // 2.1) Descargar y guardar la imagen en tu entorno
+      let publicUrl = null;
+      if (mediaId) {
+        publicUrl = await descargarYGuardarMedia({
+          mediaId,
+          phone: from,
+          tipo: 'image',
+        });
+      }
+
+      // 2.2) Guardar en el historial la imagen con su URL
+      addToHistory(session, 'cliente', caption, {
+        tipo: 'imagen',
+        url: publicUrl || (mediaId ? `media_id:${mediaId}` : null),
+        caption,
+      });
+
+      saveSession(session);
+
+      // 2.3) Usar el caption como texto para la IA
+      esTexto = true;
+      textoCliente = caption;
+      console.log(`👤 (caption imagen tratado como texto): ${textoCliente}`);
+
+    // 3) AUDIO: guardamos audio + transcribimos con Whisper y usamos la transcripción
+    } else if (message.type === 'audio') {
+      console.log(`👤 Audio recibido de ${from}`);
+
+      let session = getSessionByPhone(from);
+      if (!session) {
+        console.warn(
+          `[SESIONES] No había sesión para ${from}, creando una sesión huérfana (sin order_id).`
+        );
+        session = createSession({ telefono: from });
+      }
+
+      const mediaId = message.audio?.id || null;
+
+      let publicUrl = null;
+      let filePath = null;
+
+      if (mediaId) {
+        const mediaResult = await descargarYGuardarMedia({
+          mediaId,
+          phone: from,
+          tipo: 'audio',
+        });
+        if (mediaResult) {
+          publicUrl = mediaResult.publicUrl || null;
+          filePath = mediaResult.filePath || null;
+        }
+      }
+
+      let transcripcion = null;
+      if (filePath) {
+        try {
+          transcripcion = await transcribirAudioWhisper(filePath);
+          console.log('[STT] Transcripción de audio:', transcripcion);
+        } catch (e) {
+          console.error('[STT] Error transcribiendo audio con Whisper', e);
+        }
+      }
+
+      const textoParaHistorial =
+        transcripcion || '(Audio recibido pero no se pudo transcribir)';
+
+      addToHistory(session, 'cliente', textoParaHistorial, {
+        tipo: 'audio',
+        url: publicUrl || (mediaId ? `media_id:${mediaId}` : null),
+        transcripcion,
+      });
+
+      saveSession(session);
+
+      if (transcripcion) {
+        // 👉 usamos la transcripción como texto para la IA
+        esTexto = true;
+        textoCliente = transcripcion;
+      } else {
+        // si no hay texto, no seguimos con la máquina de estados
+        return;
+      }
+
+    // 4) Otros tipos de mensaje: de momento los ignoramos
+    } else {
+      console.log(`Mensaje de tipo no manejado: ${message.type}`);
+      return;
+    }
+
+    // 👇 A partir de aquí SOLO entramos si es texto (esTexto = true)
 
     // Buscar sesión existente
     let session = getSessionByPhone(from);
@@ -138,11 +253,16 @@ app.post('/webhook/whatsapp', async (req, res) => {
       session = createSession({ telefono: from });
     }
 
+    if (!esTexto) {
+      // Por seguridad; realmente a estas alturas siempre es true
+      return;
+    }
+
     const {
       session: updatedSession,
       mensajesACliente,
       eventos,
-    } = await procesarMensaje(session, text);
+    } = await procesarMensaje(session, textoCliente);
 
     // Guardar sesión actualizada
     saveSession(updatedSession);
