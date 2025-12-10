@@ -310,6 +310,26 @@ app.post('/webhook/whatsapp', async (req, res) => {
   }
 });
 
+// Endpoint de debug para probar la conexión con el microservicio NPS
+app.post('/debug/test-nps', async (req, res) => {
+  try {
+    console.log('[/debug/test-nps] Payload recibido:', req.body);
+
+    await enviarRespuestaEncuesta(req.body);
+
+    return res.json({
+      ok: true,
+      detalle: 'Llamada (o simulación) al NPS realizada. Revisa los logs del bot y del NPS.',
+    });
+  } catch (err) {
+    console.error('[/debug/test-nps] Error llamando al NPS:', err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
+});
+
 // 7. Arranque
 app.listen(PORT, () => {
   console.log(`whatsapp-bot escuchando en el puerto ${PORT}`);

@@ -1,10 +1,12 @@
 // npsClient.js
 const fetch = require('node-fetch'); // npm install node-fetch@2
 
-// p.ej. http://localhost:3000 en local
-// o https://encuestas-nps-xxxxx.onrender.com en Render
+// p.ej. https://encuestas-nps-xxxxx.onrender.com
 const NPS_BASE_URL = process.env.NPS_BASE_URL;
-const NPS_API_KEY  = process.env.NPS_API_KEY; // MISMA que API_KEY del microservicio NPS
+
+// Clave para llamar al microservicio NPS.
+// Preferimos NPS_API_KEY, pero si no existe usamos API_KEY (la que ya tienes).
+const NPS_API_KEY = process.env.NPS_API_KEY || process.env.API_KEY;
 
 if (!NPS_BASE_URL) {
   console.warn(
@@ -14,7 +16,7 @@ if (!NPS_BASE_URL) {
 
 if (!NPS_API_KEY) {
   console.warn(
-    '[NPS] Ojo: NPS_API_KEY no está definido. Las llamadas reales fallarán con 401.'
+    '[NPS] Ojo: NPS_API_KEY/API_KEY no está definido. Las llamadas al NPS fallarán con 401.'
   );
 }
 
@@ -25,7 +27,10 @@ async function enviarRespuestaEncuesta(payload) {
   }
 
   try {
-    console.log('[NPS] Enviando respuesta de encuesta a:', `${NPS_BASE_URL}/encuestas/respuestas`);
+    console.log(
+      '[NPS] Enviando respuesta de encuesta a:',
+      `${NPS_BASE_URL}/encuestas/respuestas`
+    );
 
     const res = await fetch(`${NPS_BASE_URL}/encuestas/respuestas`, {
       method: 'POST',
@@ -39,11 +44,7 @@ async function enviarRespuestaEncuesta(payload) {
     const text = await res.text().catch(() => '');
 
     if (!res.ok) {
-      console.error(
-        '[NPS] Error al enviar respuesta',
-        res.status,
-        text
-      );
+      console.error('[NPS] Error al enviar respuesta', res.status, text);
     } else {
       console.log('[NPS] Respuesta de encuesta enviada OK. Respuesta:', text);
     }
