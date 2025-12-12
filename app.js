@@ -110,6 +110,48 @@ async function sendWhatsAppTextMessage(to, body) {
   }
 }
 
+// 4bis. Función para enviar mensajes de plantilla por WhatsApp
+async function sendWhatsAppTemplateMessage(to, templateName, components) {
+  if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID) {
+    console.error(
+      '[WhatsApp] Falta WHATSAPP_ACCESS_TOKEN o WHATSAPP_PHONE_NUMBER_ID'
+    );
+    return;
+  }
+
+  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: {
+      name: templateName, // ej. 'nps_pedido_entregado_1'
+      language: { code: 'es' },
+      components, // normalmente solo body con parámetros
+    },
+  };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    console.log(
+      '📤 Respuesta envío WhatsApp (template):',
+      JSON.stringify(data)
+    );
+  } catch (err) {
+    console.error('[WhatsApp] Error enviando mensaje de plantilla', err);
+  }
+}
+
 // 5. Endpoint para que el microservicio NPS dispare la encuesta (Estado 0)
 app.post('/nps/start', async (req, res) => {
   const { telefono, order_id, cliente_id, nombre } = req.body;
@@ -122,13 +164,24 @@ app.post('/nps/start', async (req, res) => {
 
   const session = createSession({ telefono, order_id, cliente_id });
 
-  const saludoNombre = nombre ? ` ${nombre}` : '';
-  const textoInicial =
-    `Hola${saludoNombre} 👋\n` +
-    'Hemos visto que hace unos días recibiste tu pedido de Atrapamuebles.\n' +
-    '¿Te animas a contarnos qué tal? ¡Queremos saberlo todo sobre tu experiencia de compra! 🛋️';
+  // Nombre de la plantilla (tal como la has creado en Meta)
+  const templateName =
+    process.env.WHATSAPP_TEMPLATE_NPS || 'valorar_experiencia_compra';
 
-  await sendWhatsAppTextMessage(telefono, textoInicial);
+  // Parámetros para el cuerpo de la plantilla:
+  // {{1}} -> nombre
+  // {{2}} -> order_id
+  const components = [
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: nombre || '' },
+        { type: 'text', text: order_id },
+      ],
+    },
+  ];
+
+  await sendWhatsAppTemplateMessage(telefono, templateName, components);
 
   return res.json({ ok: true, session_id: session.id });
 });
