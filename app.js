@@ -175,7 +175,7 @@ app.post('/nps/start', async (req, res) => {
     {
       type: 'body',
       parameters: [
-        { type: 'text', text: nombre || '' },
+        { type: 'text', text: customer_name || '' },
         { type: 'text', text: order_id },
       ],
     },
