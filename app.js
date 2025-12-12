@@ -9,14 +9,21 @@ const {
   deleteSession,
 } = require('./sessions');
 const { procesarMensaje, addToHistory } = require('./conversationLogic');
-const { enviarRespuestaEncuesta } = require('./npsClient');
+const {
+  enviarRespuestaEncuesta,
+  crearConversacion,
+  registrarMensaje,
+} = require('./npsClient');
 const { enviarEmailIncidencia } = require('./emailClient');
 const { descargarYGuardarMedia, MEDIA_STORAGE_PATH } = require('./mediaService');
 const { transcribirAudioWhisper } = require('./sttClient');
 
+
 // 1. App Express
 const app = express();
 const PORT = process.env.PORT || 4000;
+// Mapa teléfono -> conversacionId (solo en memoria, para empezar)
+const conversacionesActivas = {};
 
 const VERIFY_TOKEN =
   process.env.WHATSAPP_VERIFY_TOKEN || 'mi_token_de_pruebas';
@@ -150,12 +157,16 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const from = message.from; // teléfono del cliente
     let textoCliente = '';
     let esTexto = false;
+    let tipoMensajeNps = message.type;   // 'text', 'image', 'audio', etc.
+    let mediaUrlParaNps = null;
+    let conversacionId = conversacionesActivas[from] || null;
 
     // 1) Mensajes de texto (flujo normal de IA)
     if (message.type === 'text') {
       esTexto = true;
       textoCliente = message.text?.body || '';
       console.log(`👤 Mensaje de ${from}: ${textoCliente}`);
+      mediaUrlParaNps = null; // no hay media
 
     // 2) Imagen: la descargamos, guardamos y además usamos el caption como texto para la IA
     } else if (message.type === 'image') {
@@ -195,6 +206,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
       esTexto = true;
       textoCliente = caption;
       console.log(`👤 (caption imagen tratado como texto): ${textoCliente}`);
+
+      mediaUrlParaNps = publicUrl || (mediaId ? `media_id:${mediaId}` : null);
 
     // 3) AUDIO: guardamos audio + transcribimos con Whisper y usamos la transcripción
     } else if (message.type === 'audio') {
@@ -255,6 +268,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
         return;
       }
 
+      mediaUrlParaNps = publicUrl || (mediaId ? `media_id:${mediaId}` : null);
+
     // 4) Otros tipos de mensaje: de momento los ignoramos
     } else {
       console.log(`Mensaje de tipo no manejado: ${message.type}`);
@@ -278,6 +293,37 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return;
     }
 
+    // 🔹 Asegurar conversación en el microservicio NPS
+if (!conversacionId) {
+  try {
+    const conv = await crearConversacion({
+      telefono: from,
+      order_id: session.order_id || null,
+    });
+    conversacionId = conv.id;
+    conversacionesActivas[from] = conversacionId;
+    console.log('[NPS] Conversación NPS creada para', from, '-> id', conversacionId);
+  } catch (e) {
+    console.error('[NPS] Error creando conversación para', from, e);
+  }
+}
+
+  // 🔹 Registrar mensaje entrante del cliente en NPS
+  if (conversacionId) {
+    try {
+      await registrarMensaje({
+        conversacionId,
+        direction: 'in',
+        author: 'cliente',
+        tipo: tipoMensajeNps,    // 'text' | 'image' | 'audio'...
+        texto: textoCliente,     // lo que procesará la IA
+        mediaUrl: mediaUrlParaNps,
+      });
+    } catch (e) {
+      console.error('[NPS] Error registrando mensaje entrante', e);
+    }
+  }
+
     const {
       session: updatedSession,
       mensajesACliente,
@@ -290,7 +336,22 @@ app.post('/webhook/whatsapp', async (req, res) => {
     // Responder al cliente
     for (const msg of mensajesACliente) {
       await sendWhatsAppTextMessage(from, msg);
-    }
+    // 🔹 Registrar mensaje SALIENTE del bot en NPS
+        if (conversacionId) {
+          try {
+            await registrarMensaje({
+              conversacionId,
+              direction: 'out',
+              author: 'bot',
+              tipo: 'text',
+              texto: msg,
+              mediaUrl: null,
+            });
+          } catch (e) {
+            console.error('[NPS] Error registrando mensaje saliente', e);
+          }
+        }
+      }
 
     // Ejecutar acciones técnicas (guardar encuesta, email ticket, etc.)
     for (const ev of eventos) {
