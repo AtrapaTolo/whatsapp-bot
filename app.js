@@ -31,6 +31,8 @@ const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID =
   process.env.WHATSAPP_PHONE_NUMBER_ID; // 789116377618444
 
+const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || 'es_ES';
+
 app.use(express.json());
 // Servir ficheros estáticos de media
 app.use('/media', express.static(MEDIA_STORAGE_PATH));
@@ -128,9 +130,10 @@ async function sendWhatsAppTemplateMessage(to, templateName, components) {
     type: 'template',
     template: {
       name: templateName, // ej. 'valorar_experiencia_compra'
-      language: { code: 'es' },
+      language: { code: TEMPLATE_LANG },
       components,
     },
+
   };
 
   try {
