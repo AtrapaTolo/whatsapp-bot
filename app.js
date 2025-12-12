@@ -111,6 +111,7 @@ async function sendWhatsAppTextMessage(to, body) {
 }
 
 // 4bis. Función para enviar mensajes de plantilla por WhatsApp
+// 4bis. Función para enviar mensajes de plantilla por WhatsApp
 async function sendWhatsAppTemplateMessage(to, templateName, components) {
   if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID) {
     console.error(
@@ -126,9 +127,9 @@ async function sendWhatsAppTemplateMessage(to, templateName, components) {
     to,
     type: 'template',
     template: {
-      name: templateName, // ej. 'nps_pedido_entregado_1'
+      name: templateName, // ej. 'valorar_experiencia_compra'
       language: { code: 'es' },
-      components, // normalmente solo body con parámetros
+      components,
     },
   };
 
@@ -149,41 +150,56 @@ async function sendWhatsAppTemplateMessage(to, templateName, components) {
     );
   } catch (err) {
     console.error('[WhatsApp] Error enviando mensaje de plantilla', err);
+    throw err; // importante: que salte si falla
   }
 }
 
 // 5. Endpoint para que el microservicio NPS dispare la encuesta (Estado 0)
 app.post('/nps/start', async (req, res) => {
-  const { telefono, order_id, cliente_id, nombre } = req.body;
+  try {
+    const { telefono, order_id, cliente_id, nombre } = req.body;
 
-  if (!telefono || !order_id) {
-    return res
-      .status(400)
-      .json({ error: 'telefono y order_id son obligatorios' });
+    if (!telefono || !order_id) {
+      return res
+        .status(400)
+        .json({ error: 'telefono y order_id son obligatorios' });
+    }
+
+    const session = createSession({ telefono, order_id, cliente_id });
+
+    // Nombre de la plantilla (tal como está en WhatsApp Business)
+    const templateName =
+      process.env.WHATSAPP_TEMPLATE_NPS || 'valorar_experiencia_compra';
+
+    // Parámetros para el cuerpo:
+    // {{1}} -> nombre
+    // {{2}} -> order_id
+    const components = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: nombre || '' },
+          { type: 'text', text: order_id },
+        ],
+      },
+    ];
+
+    console.log('[NPS] Enviando plantilla NPS', {
+      telefono,
+      templateName,
+      components,
+    });
+
+    await sendWhatsAppTemplateMessage(telefono, templateName, components);
+
+    return res.json({ ok: true, session_id: session.id });
+  } catch (err) {
+    console.error('[NPS] Error en /nps/start:', err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Error interno en /nps/start',
+    });
   }
-
-  const session = createSession({ telefono, order_id, cliente_id });
-
-  // Nombre de la plantilla (tal como la has creado en Meta)
-  const templateName =
-    process.env.WHATSAPP_TEMPLATE_NPS || 'valorar_experiencia_compra';
-
-  // Parámetros para el cuerpo de la plantilla:
-  // {{1}} -> nombre
-  // {{2}} -> order_id
-  const components = [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: customer_name || '' },
-        { type: 'text', text: order_id },
-      ],
-    },
-  ];
-
-  await sendWhatsAppTemplateMessage(telefono, templateName, components);
-
-  return res.json({ ok: true, session_id: session.id });
 });
 
 // 6. Webhook de mensajes de WhatsApp (POST)
