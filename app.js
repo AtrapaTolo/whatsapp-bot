@@ -178,8 +178,16 @@ app.post('/nps/start', async (req, res) => {
       {
         type: 'body',
         parameters: [
-          { type: 'text', text: nombre || '' },
-          { type: 'text', text: order_id },
+          {
+            type: 'text',
+            parameter_name: 'customer_name', // ↩ mismo nombre que en la plantilla
+            text: nombre || '',
+          },
+          {
+            type: 'text',
+            parameter_name: 'order_id',      // ↩ mismo nombre que en la plantilla
+            text: order_id,
+          },
         ],
       },
     ];
