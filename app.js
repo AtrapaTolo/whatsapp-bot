@@ -13,6 +13,7 @@ const {
   enviarRespuestaEncuesta,
   crearConversacion,
   registrarMensaje,
+  actualizarConversacion,
 } = require('./npsClient');
 const { enviarEmailIncidencia } = require('./emailClient');
 const { descargarYGuardarMedia, MEDIA_STORAGE_PATH } = require('./mediaService');
@@ -383,9 +384,18 @@ if (!conversacionId) {
     conversacionId = conv.id;
     conversacionesActivas[from] = conversacionId;
     console.log('[NPS] Conversación NPS creada para', from, '-> id', conversacionId);
+
+    // 👇 Enlazamos la sesión del bot con la conversación NPS
+    session.conversacionIdNps = conversacionId;
+    saveSession(session);
+
   } catch (e) {
     console.error('[NPS] Error creando conversación para', from, e);
   }
+} else {
+  // Si ya teníamos conversacionId, también lo ponemos en la sesión por si acaso
+  session.conversacionIdNps = conversacionId;
+  saveSession(session);
 }
 
   // 🔹 Registrar mensaje entrante del cliente en NPS
@@ -439,6 +449,16 @@ if (!conversacionId) {
         await enviarRespuestaEncuesta(ev.payload);
       } else if (ev.tipo === 'CREAR_TICKET') {
         await enviarEmailIncidencia(ev.payload);
+      } else if (ev.tipo === 'ACTUALIZAR_CONVERSACION_NPS') {
+        if (ev.payload?.conversacionId) {
+          await actualizarConversacion({
+            id: ev.payload.conversacionId,
+            tuvo_incidencia: ev.payload.tuvo_incidencia,
+            sentimiento: ev.payload.sentimiento,
+            nps_score: ev.payload.nps_score,
+            nps_comment: ev.payload.nps_comment,
+          });
+        }
       }
     }
 

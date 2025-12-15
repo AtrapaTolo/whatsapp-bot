@@ -35,6 +35,7 @@ function createSession({ telefono, order_id = null, cliente_id = null }) {
     nps_score: null,
     comentarios: '',
     sentimiento: null,
+    conversacionIdNps: null,
     historia: [], // { de: 'cliente'|'bot', texto, fecha }
     createdAt: now,
     updatedAt: now,

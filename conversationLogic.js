@@ -27,15 +27,12 @@ function addToHistory(session, de, texto, extra = {}) {
 // 👉 AQUÍ volvemos a declarar construirPayloadEncuesta
 function construirPayloadEncuesta(session) {
   return {
-    order_id: session.order_id || null,
+    pedido_id: session.order_id || null,
     cliente_id: session.cliente_id || null,
-    telefono: session.telefono,
-    incidencia: !!session.incidencia,
-    ticket_escalado: !!session.ticket_escalado,
-    cliente_contacta: !!session.cliente_contacta,
-    nps_score: session.nps_score,
-    comentarios: session.comentarios || null,
+    tuvo_incidencia: session.incidencia ? 1 : 0,           
+    satisfaccion: session.nps_score ?? null,                
     sentimiento: session.sentimiento || null,
+    comentario: session.comentarios || null,
     canal: 'whatsapp',
   };
 }
@@ -101,29 +98,6 @@ function construirPayloadEmail(session) {
         lineas.push(`   Contenido: ${m.texto}`);
       }
     }
-  });
-
-  const cuerpo = lineas.join('\n');
-  return { asunto, cuerpo };
-}
-
-function construirPayloadEmail(session) {
-  const asunto = `Incidencia encontrada en whatsapp en PVAM-${session.order_id || 'SINPEDIDO'}`;
-  const lineas = [];
-
-  lineas.push(`Pedido: ${session.order_id || 'No informado'}`);
-  lineas.push(`Cliente ID: ${session.cliente_id || 'No informado'}`);
-  lineas.push(`Teléfono: ${session.telefono}`);
-  lineas.push('');
-  lineas.push('Resumen / comentarios:');
-  lineas.push(session.comentarios || '(sin comentarios)');
-  lineas.push('');
-  lineas.push('Transcripción completa:');
-
-  session.historia.forEach((m) => {
-    lineas.push(
-      `[${m.fecha}] ${m.de === 'cliente' ? 'Cliente' : 'Bot'}: ${m.texto}`
-    );
   });
 
   const cuerpo = lineas.join('\n');
@@ -331,11 +305,26 @@ async function procesarMensaje(session, textoCliente) {
     }
   }
 
-  // Añadir respuestas del bot al historial
+    // Si la sesión está cerrada y tenemos conversación NPS, lanzamos el evento de actualización
+  if (session.estado === 'CERRADA' && session.conversacionIdNps) {
+    eventos.push({
+      tipo: 'ACTUALIZAR_CONVERSACION_NPS',
+      payload: {
+        conversacionId: session.conversacionIdNps,
+        tuvo_incidencia: session.incidencia ? 1 : 0,
+        sentimiento: session.sentimiento,
+        nps_score: session.nps_score,
+        nps_comment: session.comentarios,
+      },
+    });
+  }
+
+  // Añadir respuestas del bot al historial SIEMPRE
   mensajesACliente.forEach((texto) =>
     addToHistory(session, 'bot', texto)
   );
 
+  // Devolvemos siempre lo mismo
   return { session, mensajesACliente, eventos };
 }
 

@@ -161,8 +161,66 @@ async function registrarMensaje({
   }
 }
 
+/**
+ * 🔹 Actualizar conversación (NPS final, incidencia, sentimiento, comentario)
+ * PATCH /conversaciones/:id
+ */
+async function actualizarConversacion({
+  id,
+  tuvo_incidencia = null,   // 0 | 1 | null
+  sentimiento = null,        // 'muy_negativo' | 'negativo' | 'neutro' | ...
+  nps_score = null,          // 0-10
+  nps_comment = null,        // texto libre
+}) {
+  if (!NPS_BASE_URL || !NPS_API_KEY) {
+    console.log('[NPS] (SIMULADO) actualizarConversacion', {
+      id,
+      tuvo_incidencia,
+      sentimiento,
+      nps_score,
+      nps_comment,
+    });
+    return;
+  }
+
+  const url = `${NPS_BASE_URL}/conversaciones/${id}`;
+
+  try {
+    console.log('[NPS] Actualizando conversación en:', url);
+
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': NPS_API_KEY,
+      },
+      body: JSON.stringify({
+        tuvo_incidencia,
+        sentimiento,
+        nps_score,
+        nps_comment,
+      }),
+    });
+
+    const text = await res.text().catch(() => '');
+
+    if (!res.ok) {
+      console.error('[NPS] Error al actualizar conversación', res.status, text);
+      throw new Error(`Error NPS actualizarConversacion: ${res.status}`);
+    }
+
+    const data = JSON.parse(text || '{}');
+    console.log('[NPS] Conversación actualizada OK:', data);
+    return data;
+  } catch (err) {
+    console.error('[NPS] Error actualizando conversación', err);
+    throw err;
+  }
+}
+
 module.exports = {
   enviarRespuestaEncuesta,
   crearConversacion,
   registrarMensaje,
+  actualizarConversacion,
 };
