@@ -162,15 +162,15 @@ async function registrarMensaje({
 }
 
 /**
- * 🔹 Actualizar conversación (NPS final, incidencia, sentimiento, comentario)
+ * 🔹 ACTUALIZAR conversación (tuvo_incidencia, sentimiento, nps_score, nps_comment)
  * PATCH /conversaciones/:id
  */
 async function actualizarConversacion({
   id,
-  tuvo_incidencia = null,   // 0 | 1 | null
-  sentimiento = null,        // 'muy_negativo' | 'negativo' | 'neutro' | ...
-  nps_score = null,          // 0-10
-  nps_comment = null,        // texto libre
+  tuvo_incidencia,
+  sentimiento,
+  nps_score,
+  nps_comment,
 }) {
   if (!NPS_BASE_URL || !NPS_API_KEY) {
     console.log('[NPS] (SIMULADO) actualizarConversacion', {
@@ -185,8 +185,21 @@ async function actualizarConversacion({
 
   const url = `${NPS_BASE_URL}/conversaciones/${id}`;
 
+  // Construimos el body solo con los campos definidos
+  const body = {};
+  if (tuvo_incidencia !== undefined) body.tuvo_incidencia = tuvo_incidencia;
+  if (sentimiento !== undefined) body.sentimiento = sentimiento;
+  if (nps_score !== undefined) body.nps_score = nps_score;
+  if (nps_comment !== undefined) body.nps_comment = nps_comment;
+
+  // Por si acaso, si no hay nada que actualizar, salimos
+  if (Object.keys(body).length === 0) {
+    console.log('[NPS] actualizarConversacion llamado sin cambios, no hago PATCH');
+    return;
+  }
+
   try {
-    console.log('[NPS] Actualizando conversación en:', url);
+    console.log('[NPS] Actualizando conversación en:', url, 'body:', body);
 
     const res = await fetch(url, {
       method: 'PATCH',
@@ -194,12 +207,7 @@ async function actualizarConversacion({
         'Content-Type': 'application/json',
         'x-api-key': NPS_API_KEY,
       },
-      body: JSON.stringify({
-        tuvo_incidencia,
-        sentimiento,
-        nps_score,
-        nps_comment,
-      }),
+      body: JSON.stringify(body),
     });
 
     const text = await res.text().catch(() => '');
@@ -211,9 +219,9 @@ async function actualizarConversacion({
 
     const data = JSON.parse(text || '{}');
     console.log('[NPS] Conversación actualizada OK:', data);
-    return data;
+    return data; // en tu API devuelves { ok: true }, etc.
   } catch (err) {
-    console.error('[NPS] Error actualizando conversación', err);
+    console.error('[NPS] Error en actualizarConversacion', err);
     throw err;
   }
 }
