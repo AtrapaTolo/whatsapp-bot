@@ -25,34 +25,30 @@ if (!NPS_API_KEY) {
  * POST /encuestas/respuestas
  */
 async function enviarRespuestaEncuesta(payload) {
-  if (!NPS_BASE_URL) {
-    console.log('[NPS] (SIMULADO) Envío de respuesta de encuesta:', payload);
-    return;
+  if (!NPS_BASE_URL || !NPS_API_KEY) {
+    return { simulated: true, ok: true, status: null, body: null };
   }
 
-  try {
-    const url = `${NPS_BASE_URL}/encuestas/respuestas`;
-    console.log('[NPS] Enviando respuesta de encuesta a:', url);
+  const url = `${NPS_BASE_URL}/encuestas/respuestas`;
+  console.log('[NPS] POST', url, 'payload:', payload);
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': NPS_API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': NPS_API_KEY,
+    },
+    body: JSON.stringify(payload),
+  });
 
-    const text = await res.text().catch(() => '');
+  const text = await res.text().catch(() => '');
+  const result = { simulated: false, ok: res.ok, status: res.status, body: text };
 
-    if (!res.ok) {
-      console.error('[NPS] Error al enviar respuesta', res.status, text);
-    } else {
-      console.log('[NPS] Respuesta de encuesta enviada OK. Respuesta:', text);
-    }
-  } catch (err) {
-    console.error('[NPS] Error llamando al microservicio NPS', err);
+  if (!res.ok) {
+    throw new Error(`[NPS] POST /encuestas/respuestas falló: ${res.status} ${text}`);
   }
+
+  return result;
 }
 
 /**

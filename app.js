@@ -43,26 +43,6 @@ app.get('/ping', (req, res) => {
   res.json({ mensaje: 'pong desde whatsapp-bot' });
 });
 
-// Endpoint de debug para probar la conexión con el microservicio NPS
-app.post('/debug/test-nps', async (req, res) => {
-  try {
-    console.log('[/debug/test-nps] Payload recibido:', req.body);
-
-    const respuesta = await enviarRespuestaEncuesta(req.body);
-
-    return res.json({
-      ok: true,
-      detalle: 'Llamada (o simulación) al NPS realizada. Revisa los logs del bot y del NPS.',
-    });
-  } catch (err) {
-    console.error('[/debug/test-nps] Error llamando al NPS:', err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
-  }
-});
-
 // 3. Verificación Webhook (GET)
 app.get('/webhook/whatsapp', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -445,20 +425,25 @@ if (!conversacionId) {
 
     // Ejecutar acciones técnicas (guardar encuesta, email ticket, etc.)
     for (const ev of eventos) {
-      if (ev.tipo === 'GUARDAR_ENCUESTA') {
-        await enviarRespuestaEncuesta(ev.payload);
-      } else if (ev.tipo === 'CREAR_TICKET') {
+      if (ev.tipo === 'CREAR_TICKET') {
         await enviarEmailIncidencia(ev.payload);
-      } else if (ev.tipo === 'ACTUALIZAR_CONVERSACION_NPS') {
+        continue;
+      }
+
+      if (ev.tipo === 'ACTUALIZAR_CONVERSACION_NPS') {
         if (ev.payload?.conversacionId) {
           await actualizarConversacion({
             id: ev.payload.conversacionId,
-            tuvo_incidencia: ev.payload.tuvo_incidencia,
+            tuvo_incidencia:
+              typeof ev.payload.tuvo_incidencia === 'boolean'
+                ? (ev.payload.tuvo_incidencia ? 1 : 0)
+                : ev.payload.tuvo_incidencia,
             sentimiento: ev.payload.sentimiento,
             nps_score: ev.payload.nps_score,
             nps_comment: ev.payload.nps_comment,
           });
         }
+        continue;
       }
     }
 
@@ -474,20 +459,23 @@ if (!conversacionId) {
 // Endpoint de debug para probar la conexión con el microservicio NPS
 app.post('/debug/test-nps', async (req, res) => {
   try {
-    console.log('[/debug/test-nps] Payload recibido:', req.body);
+    const { telefono, order_id = null, tuvo_incidencia, sentimiento, nps_score, nps_comment } = req.body;
 
-    await enviarRespuestaEncuesta(req.body);
+    if (!telefono) return res.status(400).json({ ok:false, error: 'telefono es obligatorio' });
 
-    return res.json({
-      ok: true,
-      detalle: 'Llamada (o simulación) al NPS realizada. Revisa los logs del bot y del NPS.',
+    const conv = await crearConversacion({ telefono, order_id });
+
+    await actualizarConversacion({
+      id: conv.id,
+      tuvo_incidencia,
+      sentimiento,
+      nps_score,
+      nps_comment,
     });
+
+    return res.json({ ok: true, convId: conv.id });
   } catch (err) {
-    console.error('[/debug/test-nps] Error llamando al NPS:', err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 

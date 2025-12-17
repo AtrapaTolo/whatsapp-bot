@@ -5,6 +5,51 @@ const {
   clasificarOpcionTicket,
 } = require('./aiClient');
 
+function normalizeText(s = '') {
+  return s
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // quita tildes
+}
+
+function parseIncidenciaDirecta(texto) {
+  const t = normalizeText(texto);
+
+  // Respuestas numéricas típicas
+  if (t === '0') return false; // no incidencia
+  if (t === '1') return true;  // sí incidencia
+
+  // NO incidencia
+  const noSet = new Set([
+    'no', 'n', 'nop', 'para nada',
+    'ninguna', 'ninguna incidencia', 'sin incidencia', 'sin incidencias',
+    'todo bien', 'todo ok', 'todo correcto', 'bien', 'perfecto',
+    'sin problemas', 'ningun problema', 'ninguno'
+  ]);
+  if (noSet.has(t)) return false;
+
+  // SÍ incidencia
+  const siSet = new Set([
+    'si', 'sí', 's', 'sip', 'claro',
+    'he tenido incidencia', 'tuve incidencia',
+    'con incidencia', 'con incidencias',
+    'hubo un problema', 'ha habido un problema', 'mal'
+  ]);
+  if (siSet.has(t)) return true;
+
+  // Palabras clave de incidencia (si en vez de “sí” te describen el problema)
+  const keywords = [
+    'roto', 'rota', 'daño', 'danado', 'dañado', 'golpe',
+    'retraso', 'tarde', 'faltaba', 'falta', 'pieza', 'piezas',
+    'equivocado', 'incorrecto'
+  ];
+  if (keywords.some(k => t.includes(k))) return true;
+
+  return null; // no entendido
+}
+
 function addToHistory(session, de, texto, extra = {}) {
   const {
     tipo = 'texto',       // 'texto' | 'imagen' | 'audio' | ...
@@ -22,19 +67,6 @@ function addToHistory(session, de, texto, extra = {}) {
     caption,
     fecha: new Date().toISOString(),
   });
-}
-
-// 👉 AQUÍ volvemos a declarar construirPayloadEncuesta
-function construirPayloadEncuesta(session) {
-  return {
-    pedido_id: session.order_id || null,
-    cliente_id: session.cliente_id || null,
-    tuvo_incidencia: session.incidencia ? 1 : 0,           
-    satisfaccion: session.nps_score ?? null,                
-    sentimiento: session.sentimiento || null,
-    comentario: session.comentarios || null,
-    canal: 'whatsapp',
-  };
 }
 
 // 👉 construirPayloadEmail con el formato nuevo del asunto y del cuerpo
@@ -115,6 +147,10 @@ async function procesarMensaje(session, textoCliente) {
   const mensajesACliente = [];
   const eventos = [];
 
+  session.comentarios = session.comentarios || '';
+  session.historia = session.historia || [];
+  session.nps_comment = session.nps_comment || null;
+
   addToHistory(session, 'cliente', textoCliente);
 
   switch (session.estado) {
@@ -156,13 +192,34 @@ async function procesarMensaje(session, textoCliente) {
     }
 
     case 'ACLARAR_INCIDENCIA': {
-      const clasif2 = await clasificarIncidenciaTexto(
-        textoCliente,
-        session.historia
-      );
+      // ✅ 1) Primero intentamos entenderlo sin IA
+      const incDirecta = parseIncidenciaDirecta(textoCliente);
+
+      if (incDirecta === true) {
+        session.incidencia = true;
+        mensajesACliente.push(
+          '¡Vaya, sentimos mucho que hayas tenido este problema con tu pedido! 😔',
+          'Para poder ayudarte mejor, ¿podrías contarnos un poco más sobre lo que ha pasado?'
+        );
+        session.estado = 'INCIDENCIA_DETALLE';
+        break;
+      }
+
+      if (incDirecta === false) {
+        session.incidencia = false;
+        mensajesACliente.push(
+          '¡Qué bien leer eso, nos alegra mucho! 🙌',
+          'Para seguir mejorando, ¿del 0 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
+          '(Siendo 0 muy mala y 10 excelente ⭐)'
+        );
+        session.estado = 'PEDIR_NPS_SCORE';
+        break;
+      }
+
+      // ✅ 2) Si no se entiende, entonces sí: IA como fallback
+      const clasif2 = await clasificarIncidenciaTexto(textoCliente, session.historia);
       session.sentimiento = clasif2.sentimiento;
-      session.comentarios +=
-        (session.comentarios ? '\n' : '') + textoCliente;
+      session.comentarios += (session.comentarios ? '\n' : '') + textoCliente;
 
       if (clasif2.tipo === 'incidencia') {
         session.incidencia = true;
@@ -175,18 +232,20 @@ async function procesarMensaje(session, textoCliente) {
         session.incidencia = false;
         mensajesACliente.push(
           '¡Qué bien leer eso, nos alegra mucho! 🙌',
-          'Para seguir mejorando, ¿del 1 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
-          '(Siendo 1 muy mala y 10 excelente ⭐)'
+          'Para seguir mejorando, ¿del 0 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
+          '(Siendo 0 muy mala y 10 excelente ⭐)'
         );
         session.estado = 'PEDIR_NPS_SCORE';
       } else {
         mensajesACliente.push(
           'Perdona, no me ha quedado del todo claro 🙈',
-          '¿Nos podrías decir si has tenido alguna incidencia con tu pedido o si ha ido todo bien?'
+          '¿Nos podrías decir si has tenido alguna incidencia con tu pedido o si ha ido todo bien?',
+          'Responde por favor con “sí” o “no” 😊'
         );
       }
       break;
     }
+
 
     case 'INCIDENCIA_DETALLE': {
       session.comentarios +=
@@ -220,10 +279,6 @@ async function procesarMensaje(session, textoCliente) {
         session.estado = 'CERRADA';
 
         eventos.push({
-          tipo: 'GUARDAR_ENCUESTA',
-          payload: construirPayloadEncuesta(session),
-        });
-        eventos.push({
           tipo: 'CREAR_TICKET',
           payload: construirPayloadEmail(session),
         });
@@ -240,11 +295,6 @@ async function procesarMensaje(session, textoCliente) {
         );
 
         session.estado = 'CERRADA';
-
-        eventos.push({
-          tipo: 'GUARDAR_ENCUESTA',
-          payload: construirPayloadEncuesta(session),
-        });
       }
       break;
     }
@@ -252,9 +302,9 @@ async function procesarMensaje(session, textoCliente) {
     case 'PEDIR_NPS_SCORE': {
       const { score } = await extraerNotaNPS(textoCliente);
 
-      if (!score) {
+      if (score === null || score === undefined) {
         mensajesACliente.push(
-          '¿Me podrías decir un número del 1 al 10 para poder registrarlo? 😊'
+          '¿Me podrías decir un número del 0 al 10 para poder registrarlo? 😊'
         );
       } else {
         session.nps_score = score;
@@ -270,9 +320,10 @@ async function procesarMensaje(session, textoCliente) {
     }
 
     case 'PREGUNTA_ABIERTA_OPCIONAL': {
-      if (textoCliente && textoCliente.trim()) {
-        session.comentarios +=
-          (session.comentarios ? '\n' : '') + textoCliente;
+      const t = (textoCliente || '').trim();
+
+      if (t) {
+        session.nps_comment = t;   // ✅ SOLO el comentario final del NPS
       }
 
       mensajesACliente.push(
@@ -281,13 +332,9 @@ async function procesarMensaje(session, textoCliente) {
       );
 
       session.estado = 'CERRADA';
-
-      eventos.push({
-        tipo: 'GUARDAR_ENCUESTA',
-        payload: construirPayloadEncuesta(session),
-      });
       break;
     }
+
 
     case 'CERRADA': {
       mensajesACliente.push(
@@ -314,7 +361,7 @@ async function procesarMensaje(session, textoCliente) {
         tuvo_incidencia: session.incidencia ? 1 : 0,
         sentimiento: session.sentimiento,
         nps_score: session.nps_score,
-        nps_comment: session.comentarios,
+        nps_comment: session.nps_comment,
       },
     });
   }
