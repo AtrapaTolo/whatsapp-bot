@@ -4,6 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
+    "build:kb": "node scripts/buildKbIndex.js",
     "start": "node app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -15,6 +16,6 @@
     "express": "^5.2.1",
     "node-fetch": "^2.7.0",
     "nodemailer": "^7.0.11",
-    "openai": "^6.10.0"
+    "openai": "^6.14.0"
   }
 }

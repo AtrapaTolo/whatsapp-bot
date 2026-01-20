@@ -39,6 +39,9 @@ function createSession({ telefono, order_id = null, cliente_id = null }) {
     historia: [], // { de: 'cliente'|'bot', texto, fecha }
     createdAt: now,
     updatedAt: now,
+    closedAt: null,
+    tipo: 'encuesta', // nuevo: 'encuesta' | 'soporte'
+
   };
 
   sessions.set(id, session);
@@ -54,9 +57,18 @@ function deleteSession(id) {
   sessions.delete(id);
 }
 
+function getLastSessionByPhone(telefono) {
+  const all = Array.from(sessions.values()).filter((s) => s.telefono === telefono);
+  if (!all.length) return null;
+
+  all.sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+  return all[0];
+}
+
 module.exports = {
   getSessionByPhone,
   createSession,
   saveSession,
   deleteSession,
+  getLastSessionByPhone,
 };

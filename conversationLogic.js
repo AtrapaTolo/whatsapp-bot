@@ -14,8 +14,26 @@ function normalizeText(s = '') {
     .replace(/[\u0300-\u036f]/g, ''); // quita tildes
 }
 
+function sentimientoFromNps(score) {
+  if (score === null || score === undefined) return null;
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+
+  if (n <= 2) return 'muy_negativo';
+  if (n <= 4) return 'negativo';
+  if (n <= 6) return 'neutro';
+  if (n <= 8) return 'positivo';
+  return 'muy_positivo'; // 9-10
+}
+
 function parseIncidenciaDirecta(texto) {
   const t = normalizeText(texto);
+
+  // ✅ detectar negación de incidencia aunque sea frase larga
+  if (/\b(no|sin|ninguna)\b.*\bincidenc/i.test(t)) return false;
+
+  // ✅ detectar afirmación de incidencia aunque sea frase larga
+  if (/\b(tuve|he tenido|hubo|hay|con)\b.*\bincidenc/i.test(t)) return true;
 
   // Respuestas numéricas típicas
   if (t === '0') return false; // no incidencia
@@ -150,12 +168,36 @@ async function procesarMensaje(session, textoCliente) {
   session.comentarios = session.comentarios || '';
   session.historia = session.historia || [];
   session.nps_comment = session.nps_comment || null;
+  session.nps_actualizada = session.nps_actualizada || false;
 
   addToHistory(session, 'cliente', textoCliente);
 
   switch (session.estado) {
     case 'ESPERANDO_RESPUESTA_INICIAL':
     case undefined: {
+      const incDirecta = parseIncidenciaDirecta(textoCliente);
+
+      if (incDirecta === true) {
+        session.incidencia = true;
+        mensajesACliente.push(
+          '¡Vaya, sentimos mucho que hayas tenido este problema con tu pedido! 😔',
+          'Para poder ayudarte mejor, ¿podrías contarnos un poco más sobre lo que ha pasado?'
+        );
+        session.estado = 'INCIDENCIA_DETALLE';
+        break;
+      }
+
+      if (incDirecta === false) {
+        session.incidencia = false;
+        mensajesACliente.push(
+          '¡Qué bien leer eso, nos alegra mucho! 🙌',
+          'Para seguir mejorando, ¿del 0 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
+          '(Siendo 0 muy mala y 10 excelente ⭐)'
+        );
+        session.estado = 'PEDIR_NPS_SCORE';
+        break;
+      }
+  
       const clasif = await clasificarIncidenciaTexto(
         textoCliente,
         session.historia
@@ -177,8 +219,8 @@ async function procesarMensaje(session, textoCliente) {
         session.incidencia = false;
         mensajesACliente.push(
           '¡Qué bien leer eso, nos alegra mucho! 🙌',
-          'Para seguir mejorando, ¿del 1 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
-          '(Siendo 1 muy mala y 10 excelente ⭐)'
+          'Para seguir mejorando, ¿del 0 al 10 cómo valorarías tu experiencia de compra con Atrapamuebles?',
+          '(Siendo 0 muy mala y 10 excelente ⭐)'
         );
         session.estado = 'PEDIR_NPS_SCORE';
       } else {
@@ -263,7 +305,12 @@ async function procesarMensaje(session, textoCliente) {
     }
 
     case 'INCIDENCIA_OPCION_TICKET_O_CONTACTO': {
-      const opcion = await clasificarOpcionTicket(textoCliente);
+      const t = normalizeText(textoCliente);
+      let opcion = null;
+
+      if (t === '1') opcion = 'abrir_ticket';
+      else if (t === '2') opcion = 'cliente_contacta';
+      else opcion = await clasificarOpcionTicket(textoCliente);
 
       if (opcion === 'abrir_ticket') {
         session.ticket_escalado = true;
@@ -278,10 +325,7 @@ async function procesarMensaje(session, textoCliente) {
 
         session.estado = 'CERRADA';
 
-        eventos.push({
-          tipo: 'CREAR_TICKET',
-          payload: construirPayloadEmail(session),
-        });
+        session.crear_ticket_pendiente = true;
       } else {
         session.ticket_escalado = false;
         session.cliente_contacta = true;
@@ -308,6 +352,8 @@ async function procesarMensaje(session, textoCliente) {
         );
       } else {
         session.nps_score = score;
+
+        if (!session.sentimiento) session.sentimiento = sentimientoFromNps(score);
 
         mensajesACliente.push(
           '¡Gracias! 🙏',
@@ -353,26 +399,35 @@ async function procesarMensaje(session, textoCliente) {
   }
 
     // Si la sesión está cerrada y tenemos conversación NPS, lanzamos el evento de actualización
-  if (session.estado === 'CERRADA' && session.conversacionIdNps) {
-    eventos.push({
-      tipo: 'ACTUALIZAR_CONVERSACION_NPS',
-      payload: {
-        conversacionId: session.conversacionIdNps,
-        tuvo_incidencia: session.incidencia ? 1 : 0,
-        sentimiento: session.sentimiento,
-        nps_score: session.nps_score,
-        nps_comment: session.nps_comment,
-      },
-    });
-  }
+  if (session.estado === 'CERRADA' && session.conversacionIdNps && !session.nps_actualizada) {
+  eventos.push({
+    tipo: 'ACTUALIZAR_CONVERSACION_NPS',
+    payload: {
+      conversacionId: session.conversacionIdNps,
+      tuvo_incidencia: session.incidencia ? 1 : 0,
+      sentimiento: session.sentimiento ?? null,
+      nps_score: session.nps_score ?? null,
+      nps_comment: session.nps_comment ?? null,
+    },
+  });
+  session.nps_actualizada = true;
+}
 
   // Añadir respuestas del bot al historial SIEMPRE
   mensajesACliente.forEach((texto) =>
     addToHistory(session, 'bot', texto)
   );
 
+  if (session.crear_ticket_pendiente) {
+  eventos.push({
+    tipo: 'CREAR_TICKET',
+    payload: construirPayloadEmail(session),
+  });
+  session.crear_ticket_pendiente = false;
+}
+
   // Devolvemos siempre lo mismo
   return { session, mensajesACliente, eventos };
 }
 
-module.exports = { procesarMensaje, addToHistory };
+module.exports = { procesarMensaje, addToHistory, construirPayloadEmail };

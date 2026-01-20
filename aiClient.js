@@ -63,36 +63,50 @@ async function clasificarIncidenciaTexto(texto /*, historial */) {
 
 async function extraerNotaNPS(texto) {
   const t = (texto || '').toLowerCase();
-  const match = t.match(/(\d{1,2})/);
-  if (!match) {
-    return { score: null };
+
+  // 1) Caso ideal: solo el número
+  let m = t.match(/^\s*(10|[0-9])\s*$/);
+
+  // 2) Caso típico: “un 8”, “pongo 10”, “mi nota es 7”
+  if (!m) {
+    m = t.match(/\b(10|[0-9])\b/);
   }
-  const num = parseInt(match[1], 10);
-  if (num < 1 || num > 10) return { score: null };
+
+  if (!m) return { score: null };
+
+  const num = parseInt(m[1], 10);
   return { score: num };
 }
 
+function normalizeSimple(s = '') {
+  return s
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 async function clasificarOpcionTicket(texto) {
-  const t = (texto || '').toLowerCase();
-  if (
-    t.includes('1') ||
-    t.includes('ticket') ||
-    t.includes('abrir') ||
-    t.includes('sí') ||
-    t.includes('si ')
-  ) {
-    return 'abrir_ticket';
-  }
-  if (
-    t.includes('2') ||
-    t.includes('llamar') ||
-    t.includes('yo') ||
-    t.includes('escribo') ||
-    t.includes('contacto')
-  ) {
+  const t0 = (texto || '').toString();
+  const t = normalizeSimple(t0);
+
+  // 1) Si responde EXACTAMENTE 1 o 2 (o con emoji 1️⃣/2️⃣)
+  if (/^\s*(1|1️⃣)\s*$/.test(t0.trim())) return 'abrir_ticket';
+  if (/^\s*(2|2️⃣)\s*$/.test(t0.trim())) return 'cliente_contacta';
+
+  // 2) Si responde "uno/dos"
+  if (/^\s*uno\s*$/.test(t)) return 'abrir_ticket';
+  if (/^\s*dos\s*$/.test(t)) return 'cliente_contacta';
+
+  // 3) Keywords claras
+  if (t.includes('ticket') || t.includes('abrir')) return 'abrir_ticket';
+  if (t.includes('llamar') || t.includes('contactar') || t.includes('contacto') || t.includes('prefiero yo'))
     return 'cliente_contacta';
-  }
-  // Por defecto, para no dejar el tema en el aire, asumimos abrir ticket
+
+  // 4) Sí/No: si dice "sí", asumimos abrir ticket (como hacías)
+  if (t === 'si' || t === 'sí') return 'abrir_ticket';
+
   return 'abrir_ticket';
 }
 

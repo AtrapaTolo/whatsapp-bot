@@ -167,6 +167,7 @@ async function actualizarConversacion({
   sentimiento,
   nps_score,
   nps_comment,
+  estado,
 }) {
   if (!NPS_BASE_URL || !NPS_API_KEY) {
     console.log('[NPS] (SIMULADO) actualizarConversacion', {
@@ -187,7 +188,8 @@ async function actualizarConversacion({
   if (sentimiento !== undefined) body.sentimiento = sentimiento;
   if (nps_score !== undefined) body.nps_score = nps_score;
   if (nps_comment !== undefined) body.nps_comment = nps_comment;
-
+  if (estado !== undefined) body.estado = estado;
+  
   // Por si acaso, si no hay nada que actualizar, salimos
   if (Object.keys(body).length === 0) {
     console.log('[NPS] actualizarConversacion llamado sin cambios, no hago PATCH');
